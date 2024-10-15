@@ -414,6 +414,7 @@ void render() {
     glClear(GL_COLOR_BUFFER_BIT);
     glColor3f(1.0f, 1.0f, 1.0f);
     glPushMatrix();
+    glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, backgroundTexture);
    
     glBegin(GL_QUADS);

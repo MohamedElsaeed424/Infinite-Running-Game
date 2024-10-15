@@ -3,9 +3,10 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstdlib>
+#include <ctime>
+#include "TextureBuilder.h"
 #include <glut.h>
-
-
 
 const int WINDOW_WIDTH = 800;
 const int WINDOW_HEIGHT = 600;
@@ -26,8 +27,10 @@ float gameSpeed = 2.0f;
 bool gameRunning = true;
 
 GLuint backgroundTexture;
+GLuint obstacleTexture;
 float backgroundOffset = 0.0f;
 const float scrollSpeed = 2.0f;
+int rep = 1;
 
 
 struct GameObject {
@@ -221,22 +224,36 @@ void drawGameObjects() {
 
         if (obj.type == 0) { // Obstacle
 
-            glColor3f(1.0f, 0.0f, 0.0f);
 
-            // Drawing the top triangle part of the obstacle
+            // Ensure you enable texturing
+            glEnable(GL_TEXTURE_2D);
+
+            // STEP 1: Render the background
+            glColor3f(1.0f, 1.0f, 1.0f);  // White to ensure texture colors are not tinted
+
+            // STEP 2: Render the obstacle on top of the background
+
+            glBindTexture(GL_TEXTURE_2D, obstacleTexture);  // Bind the obstacle texture
+
+            // Drawing the obstacle
             glBegin(GL_TRIANGLES);
-            glVertex2f(-15, -10);  // Left vertex
-            glVertex2f(15, -10);   // Right vertex
-            glVertex2f(0, 20);     // Top vertex (centered)
+            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Left vertex
+            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Right vertex
+            glTexCoord2f(0.5f, 1.0f); glVertex2f(0, 20);     // Top vertex (centered)
             glEnd();
 
-            // Drawing the bottom quad part of the obstacle
             glBegin(GL_QUADS);
-            glVertex2f(-15, -10);  // Bottom-left vertex
-            glVertex2f(15, -10);   // Bottom-right vertex
-            glVertex2f(15, -30);   // Bottom-right (lower)
-            glVertex2f(-15, -30);  // Bottom-left (lower)
+            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Bottom-left vertex
+            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Bottom-right vertex
+            glTexCoord2f(1.0f, 1.0f); glVertex2f(15, -30);   // Bottom-right (lower)
+            glTexCoord2f(0.0f, 1.0f); glVertex2f(-15, -30);  // Bottom-left (lower)
             glEnd();
+
+            // Unbind the obstacle texture
+            glBindTexture(GL_TEXTURE_2D, 0);
+
+            // Disable 2D texturing after drawing
+            glDisable(GL_TEXTURE_2D);
 
         }
         else if (obj.type == 1) { // Collectable
@@ -392,28 +409,21 @@ void update(int value) {
         glutTimerFunc(16, update, 0);
     }
 }
-void renderBackground() {
-    glBindTexture(GL_TEXTURE_2D, backgroundTexture);
-
-    // Adjust the background offset to create scrolling effect
-    glPushMatrix();
-    glTranslatef(backgroundOffset, 0.0f, 0.0f); // Move texture horizontally
-
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f); glVertex2f(0, 0);
-    glTexCoord2f(1.0f, 0.0f); glVertex2f(WINDOW_WIDTH, 0);
-    glTexCoord2f(1.0f, 1.0f); glVertex2f(WINDOW_WIDTH, WINDOW_HEIGHT);
-    glTexCoord2f(0.0f, 1.0f); glVertex2f(0, WINDOW_HEIGHT);
-    glEnd();
-
-    glPopMatrix();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-}
 // to draw the game objects and player
 void render() {
     glClear(GL_COLOR_BUFFER_BIT);
-    renderBackground();
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glPushMatrix();
+    glBindTexture(GL_TEXTURE_2D, backgroundTexture);
+   
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0, 0, 0);
+    glTexCoord2f(rep, 0.0f); glVertex3f(800, 0, 0);
+    glTexCoord2f(rep, rep); glVertex3f(800, 600, 0);
+    glTexCoord2f(0.0f, rep); glVertex3f(0, 600, 0);
+    glEnd();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glPopMatrix();
 
     if (gameRunning) {
         drawBoundaries();
@@ -448,42 +458,22 @@ void render() {
 
     glutSwapBuffers();
 }
-void loadTexture(const char* filename, GLuint& textureID) {
-    int width, height, channels;
-    unsigned char* image = stbi_load(filename, &width, &height, &channels, 0);
-
-    if (image == nullptr) {
-        printf("Failed to load image %s\n", filename);
-        exit(1);
-    }
-
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-
-    // Set texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-    // Upload the texture to the GPU
-    if (channels == 3) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
-    }
-    else if (channels == 4) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
-    }
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    stbi_image_free(image);
-}
 
 
 void initGame() {
     srand(static_cast<unsigned int>(time(0)));
-    glEnable(GL_TEXTURE_2D);
-    loadTexture("Forest1.png", backgroundTexture);
+    loadBMP(&backgroundTexture, "textures/background.bmp", false);
+    glBindTexture(GL_TEXTURE_2D, backgroundTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    loadBMP(&obstacleTexture, "textures/obs.bmp", false);
+    glBindTexture(GL_TEXTURE_2D, obstacleTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     gameObjects.clear();
     playerY = 50;
     score = 0;
@@ -521,9 +511,11 @@ int main(int argc, char** argv) {
     glutTimerFunc(16, update, 0);
 
     glMatrixMode(GL_PROJECTION);
+    glEnable(GL_TEXTURE_2D);
     glLoadIdentity();
     gluOrtho2D(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT);
     glMatrixMode(GL_MODELVIEW);
+   
 
     initGame();
 

@@ -9,76 +9,74 @@
 #include <glut.h>
 #include <windows.h>
 #include <mmsystem.h>
+#include <chrono>
 
 #define M_PI 3.14159265358979323846
 
-
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 600;
-
-
-float playerY = 50.0f;
-float playerVelocityY = 0.0f;
-float gravity = -0.5f;
-bool isJumping = false;
-bool isDucking = false;
-const float jumpStrength = 12.0f;
-
-
-int playerLives = 5;
-int score = 0;
-float gameTime = 60.0f;
-float gameSpeed = 2.0f;
-bool gameRunning = true;
-
+enum PowerUpType { SPEED_BOOST, INVINCIBILITY };
 GLuint backgroundTexture;
 GLuint obstacleTexture;
 GLuint playerTexture;
-float backgroundOffset = 0.0f;
-const float scrollSpeed = 2.0f;
-int rep = 1;
-
-bool isBackgroundMusicPlaying = false;
-
-
+GLuint cloudTexture;
+std::vector<GameObject> gameObjects;
 struct GameObject {
     float x, y;
     bool active;
     int type; // 0: obstacle, 1: collectable, 2: power-up
 };
+std::chrono::time_point<std::chrono::steady_clock> lastFrameTime;
 
-std::vector<GameObject> gameObjects;
-
-
-enum PowerUpType { SPEED_BOOST, INVINCIBILITY };
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 600;
+int score = 0;
+float playerY = 50.0f;
+float playerVelocityY = 0.0f;
+int playerLives = 5;
+float gravity = -0.5f;
+bool isJumping = false;
+const float jumpStrength = 12.0f;
+bool isDucking = false;
+float gameTime = 60.0f;
+float gameSpeed = 2.0f;
+bool gameRunning = true;
+float backgroundOffset = 0.0f;
+const float scrollSpeed = 2.0f;
+bool isBackgroundMusicPlaying = false;
+int rep = 1;
 PowerUpType activePowerUp = SPEED_BOOST;
 float powerUpDuration = 0.0f;
+static float cloudOffset = -450.0f;
+double lastFrameTime = 0.0;
+float cloudOffset = -450.0f;  // Starting position of the cloud, off-screen to the left
 
 
-void drawText(float x, float y, std::string text);
-void spawnGameObject(int type);
+void drawCloud();
+void updateCloudPosition(float deltaTime);
+float calculateDeltaTime();
+void updatePlayerPosition();
+LPCWSTR convertToLPCWSTR(const char* charArray);
+void playSound(const char* filename, bool loop = false);
+void stopBackgroundMusic();
+void drawPlayer();
+void drawBoundaries();
 void updateGameObjects();
 void drawGameObjects();
+void drawHealth();
+void handleKeyPress(unsigned char key, int x, int y);
+void handleKeyRelease(unsigned char key, int x, int y);
+void update(int value);
+void render();
+void initGame();
+void drawText(float x, float y, std::string text);
+void spawnGameObject(int type);
 
-void updatePlayerPosition() {
-    if (isJumping) {
-        playerVelocityY += gravity;
-        playerY += playerVelocityY;
-
-        if (playerY <= 50.0f) {
-            playerY = 50.0f;
-            isJumping = false;
-            playerVelocityY = 0.0f;
-        }
-    }
-
-    if (isDucking) {
-        playerY = 30.0f;
-    }
-    else if (!isJumping) {
-        playerY = 50.0f;
-    }
+float calculateDeltaTime() {
+    auto currentTime = std::chrono::steady_clock::now();
+    std::chrono::duration<float> elapsedTime = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+    return elapsedTime.count();  // Return time in seconds
 }
+
 LPCWSTR convertToLPCWSTR(const char* charArray) {
     size_t newSize = strlen(charArray) + 1;
     wchar_t* wString = new wchar_t[newSize];
@@ -100,11 +98,374 @@ void playSound(const char* filename, bool loop = false) {
 
     delete[] wideFilename; // Clean up memory
 }
+
+
 void stopBackgroundMusic() {
     PlaySound(NULL, NULL, 0); // Stops the sound
     isBackgroundMusicPlaying = false; // Reset the flag
 }
+void handleKeyPress(unsigned char key, int x, int y) {
+    if (key == ' ' && !isJumping) {
+        //playSound("sounds/jump.wav");
+        isJumping = true;
+        playerVelocityY = jumpStrength;
+    }
 
+    if (key == 's') {
+        isDucking = true;
+    }
+}
+void handleKeyRelease(unsigned char key, int x, int y) {
+    if (key == 's') {
+        isDucking = false;
+    }
+}
+
+void drawCloud() {
+    // Bind the cloud texture
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, cloudTexture);
+
+    // Push the current matrix to preserve transformations
+    glPushMatrix();
+
+    // Translate the cloud based on the cloudOffset value
+    glTranslatef(cloudOffset, 100.0f, 0.0f);  // Move horizontally, keep vertical position fixed
+
+    // Draw the cloud as a quad with texture
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(-50, -30);  // Bottom-left corner
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(50, -30);   // Bottom-right corner
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(50, 30);    // Top-right corner
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(-50, 30);   // Top-left corner
+    glEnd();
+
+    // Pop the matrix to restore the previous transformations
+    glPopMatrix();
+
+    // Unbind the texture
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+void drawBoundaries() {
+    // Upper boundary (4 different primitives)
+    const float lightGray[3] = { 0.8f, 0.8f, 0.8f };
+    const float mediumGray[3] = { 0.6f, 0.6f, 0.6f };
+    const float darkGray[3] = { 0.4f, 0.4f, 0.4f };
+
+    // 1. GL_TRIANGLE_STRIP for solid base with shading
+    glBegin(GL_TRIANGLE_STRIP);
+    for (int i = 0; i <= WINDOW_WIDTH; i += 20) {
+        float t = (float)i / WINDOW_WIDTH;
+        float shade = 0.6f + 0.2f * sin(t * M_PI); // Subtle shading effect
+        glColor3f(shade, shade, shade);
+        glVertex2f(i, WINDOW_HEIGHT - 20 + 5 * sin(i * 0.05f));
+        glColor3f(shade * 0.8f, shade * 0.8f, shade * 0.8f);
+        glVertex2f(i, WINDOW_HEIGHT - 40);
+    }
+    glEnd();
+
+    // 2. GL_POINTS for subtle texture
+    glEnable(GL_POINT_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glPointSize(2.0f);
+    glBegin(GL_POINTS);
+    for (int i = 0; i < WINDOW_WIDTH; i += 10) {
+        float t = (float)i / WINDOW_WIDTH;
+        float alpha = 0.3f + 0.2f * sin(t * M_PI * 2); // Varying transparency
+        glColor4f(lightGray[0], lightGray[1], lightGray[2], alpha);
+        glVertex2f(i, WINDOW_HEIGHT - 30 + 3 * sin(i * 0.1f));
+    }
+    glEnd();
+    glDisable(GL_POINT_SMOOTH);
+    glDisable(GL_BLEND);
+
+    // 3. GL_LINE_STRIP for subtle curve
+    glBegin(GL_LINE_STRIP);
+    glColor3f(darkGray[0], darkGray[1], darkGray[2]);
+    for (int i = 0; i <= WINDOW_WIDTH; i += 10) {
+        float y = WINDOW_HEIGHT - 35 + 3 * sin(i * 0.03f);
+        glVertex2f(i, y);
+    }
+    glEnd();
+
+    // 4. GL_TRIANGLES for subtle top texture
+    glBegin(GL_TRIANGLES);
+    for (int i = 0; i < WINDOW_WIDTH; i += 40) {
+        float t = (float)i / WINDOW_WIDTH;
+        float shade = 0.7f + 0.1f * sin(t * M_PI * 2); // Subtle shading
+        glColor3f(shade, shade, shade);
+        glVertex2f(i, WINDOW_HEIGHT - 20);
+        glVertex2f(i + 20, WINDOW_HEIGHT - 15);
+        glVertex2f(i + 40, WINDOW_HEIGHT - 20);
+    }
+    glEnd();
+
+    // Lower boundary (4 different primitives)
+
+    const float baseGreen[3] = { 0.55f, 0.27f, 0.07f };  // Base brown (medium brown, like earth)
+    const float darkGreen[3] = { 0.36f, 0.25f, 0.20f };  // Darker brown for shadows
+    const float lightGreen[3] = { 0.76f, 0.60f, 0.42f }; // Lighter brown for highlights
+
+
+    // 1. GL_QUAD_STRIP for solid base
+    glBegin(GL_QUAD_STRIP);
+    for (int i = 0; i <= WINDOW_WIDTH; i += 20) {
+        glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
+        glVertex2f(i, 30);
+        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
+        glVertex2f(i, 0);
+    }
+    glEnd();
+
+    // 2. GL_LINES for subtle texture
+    glBegin(GL_LINES);
+    glColor3f(lightGreen[0], lightGreen[1], lightGreen[2]);
+    for (int i = 0; i < WINDOW_WIDTH; i += 40) {
+        glVertex2f(i, 0);
+        glVertex2f(i + 20, 30);
+    }
+    glEnd();
+
+    // 3. GL_TRIANGLES for subtle shapes
+    glBegin(GL_TRIANGLES);
+    for (int i = 0; i < WINDOW_WIDTH; i += 100) {
+        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
+        glVertex2f(i, 0);
+        glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
+        glVertex2f(i + 25, 20);
+        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
+        glVertex2f(i + 50, 0);
+    }
+    glEnd();
+
+    // 4. GL_TRIANGLE_FAN for subtle circular details
+    for (int i = 0; i < WINDOW_WIDTH; i += 200) {
+        glBegin(GL_TRIANGLE_FAN);
+        glColor3f(lightGreen[0], lightGreen[1], lightGreen[2]);
+        glVertex2f(i + 50, 15);  // center
+        int segments = 16;
+        for (int j = 0; j <= segments; j++) {
+            float theta = 2.0f * M_PI * (float)j / (float)segments;
+            float x = i + 50 + 10 * cosf(theta);
+            float y = 15 + 10 * sinf(theta);
+            if (j % 2 == 0) {
+                glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
+            }
+            else {
+                glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
+            }
+            glVertex2f(x, y);
+        }
+        glEnd();
+    }
+}
+void drawHealth() {
+    for (int i = 0; i < playerLives; ++i) {
+        glPushMatrix();
+        glTranslatef(50 + i * 40, WINDOW_HEIGHT - 50, 0);
+
+        glColor3f(1.0f, 0.0f, 0.0f);
+        glBegin(GL_TRIANGLE_FAN);
+        for (int j = 0; j < 360; j++) {
+            float theta = j * 3.14159f / 180.0f;
+            glVertex2f(10 * 16 * pow(sin(theta), 3) / 13,
+                -10 * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 13);
+        }
+        glEnd();
+
+        glPopMatrix();
+    }
+}
+void drawGameObjects() {
+    // Iterate through all game objects
+    for (const auto& obj : gameObjects) {
+        glPushMatrix();
+        glTranslatef(obj.x, obj.y, 0);
+
+        if (obj.type == 0) { // Obstacle
+
+
+            // Ensure you enable texturing
+            glEnable(GL_TEXTURE_2D);
+
+            // STEP 1: Render the background
+            glColor3f(1.0f, 1.0f, 1.0f);  // White to ensure texture colors are not tinted
+
+            // STEP 2: Render the obstacle on top of the background
+
+            glBindTexture(GL_TEXTURE_2D, obstacleTexture);  // Bind the obstacle texture
+
+            // Drawing the obstacle
+            glBegin(GL_TRIANGLES);
+            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Left vertex
+            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Right vertex
+            glTexCoord2f(0.5f, 1.0f); glVertex2f(0, 20);     // Top vertex (centered)
+            glEnd();
+
+            glBegin(GL_QUADS);
+            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Bottom-left vertex
+            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Bottom-right vertex
+            glTexCoord2f(1.0f, 1.0f); glVertex2f(15, -30);   // Bottom-right (lower)
+            glTexCoord2f(0.0f, 1.0f); glVertex2f(-15, -30);  // Bottom-left (lower)
+            glEnd();
+
+            // Unbind the obstacle texture
+            glBindTexture(GL_TEXTURE_2D, 0);
+
+            // Disable 2D texturing after drawing
+            glDisable(GL_TEXTURE_2D);
+
+        }
+        else if (obj.type == 1) { // Collectable
+            static float collectableRotationAngle = 0.0f;  // Rotation angle
+            static float scaleFactor = 1.0f;               // Scaling factor
+            static bool scaleUp = true;                    // Track if we are scaling up or down
+
+            // Translate to the collectable's position
+            //glPushMatrix();  // Save the current transformation matrix
+            //glTranslatef(obj.x, obj.y, 0);
+
+            // Apply scaling
+            glScalef(scaleFactor, scaleFactor, 1.0f);
+
+            // Apply rotation (counter-clockwise)
+            glRotatef(collectableRotationAngle, 0.0f, 0.0f, -1.0f);
+
+            // Draw the collectable with different primitives
+            // Primitive 1: Central square (GL_QUADS)
+            glColor3f(1.0f, 0.5f, 0.0f);  // Orange color
+            glBegin(GL_QUADS);
+            glVertex2f(-10, -10);
+            glVertex2f(10, -10);
+            glVertex2f(10, 10);
+            glVertex2f(-10, 10);
+            glEnd();
+
+            // Primitive 2: Cross (GL_LINES)
+            glColor3f(0.0f, 1.0f, 0.0f);  // Green color
+            glBegin(GL_LINES);
+            glVertex2f(0, -15);  // Vertical line
+            glVertex2f(0, 15);
+            glVertex2f(-15, 0);  // Horizontal line
+            glVertex2f(15, 0);
+            glEnd();
+
+            // Primitive 3: Triangle at the top (GL_TRIANGLES)
+            glColor3f(0.0f, 0.0f, 1.0f);  // Blue color
+            glBegin(GL_TRIANGLES);
+            glVertex2f(0, 20);    // Top vertex
+            glVertex2f(-8, 10);   // Left vertex
+            glVertex2f(8, 10);    // Right vertex
+            glEnd();
+
+            // Primitive 4: Circular fan (GL_TRIANGLE_FAN)
+            glColor3f(1.0f, 1.0f, 0.0f);  // Yellow color
+            glBegin(GL_TRIANGLE_FAN);
+            glVertex2f(0, 0);  // Center point
+            for (int i = 0; i < 360; i += 36) {
+                float theta = i * 3.14159f / 180.0f;
+                glVertex2f(10 * cos(theta), 10 * sin(theta));
+            }
+            glEnd();
+
+            // Update the rotation angle for the collectable
+            collectableRotationAngle += 1.0f;
+            if (collectableRotationAngle > 360.0f) {
+                collectableRotationAngle -= 360.0f;
+            }
+
+            // Update the scaling factor to oscillate
+            if (scaleUp) {
+                scaleFactor += 0.01f;  // Scale up
+                if (scaleFactor >= 1.5f) scaleUp = false;  // Reverse direction
+            }
+            else {
+                scaleFactor -= 0.01f;  // Scale down
+                if (scaleFactor <= 0.5f) scaleUp = true;  // Reverse direction
+            }
+
+        }
+        else if (obj.type == 2) { // Power-up
+            static float powerUpRotationAngle = 0.0f;
+            //glTranslatef(obj.x, obj.y, 0);
+            glRotatef(powerUpRotationAngle, 0.0f, 0.0f, 1.0f);
+
+            if (activePowerUp == SPEED_BOOST) {
+                glColor3f(0.0f, 1.0f, 1.0f);
+
+                // Drawing the central square
+                glBegin(GL_QUADS);
+                glVertex2f(-8, -8);
+                glVertex2f(8, -8);
+                glVertex2f(8, 8);
+                glVertex2f(-8, 8);
+                glEnd();
+
+                // Drawing the triangles pointing outwards (4 triangles)
+                glBegin(GL_TRIANGLES);
+                // Top triangle
+                glVertex2f(0, 12);
+                glVertex2f(-5, 5);
+                glVertex2f(5, 5);
+                // Bottom triangle
+                glVertex2f(0, -12);
+                glVertex2f(-5, -5);
+                glVertex2f(5, -5);
+                // Left triangle
+                glVertex2f(-12, 0);
+                glVertex2f(-5, 5);
+                glVertex2f(-5, -5);
+                // Right triangle
+                glVertex2f(12, 0);
+                glVertex2f(5, 5);
+                glVertex2f(5, -5);
+                glEnd();
+
+                // Drawing cross lines through the center
+                glBegin(GL_LINES);
+                glVertex2f(-12, 0);
+                glVertex2f(12, 0);
+                glVertex2f(0, -12);
+                glVertex2f(0, 12);
+                glEnd();
+            }
+            else if (activePowerUp == INVINCIBILITY) {
+                // Second Power-up: Hexagon with diagonal lines
+                glBegin(GL_POLYGON);
+                for (int i = 0; i < 6; i++) {
+                    float theta = i * 3.14159f / 3.0f;
+                    if (i % 2 == 0) {
+                        glColor3f(0.0f, 1.0f, 0.0f);  // Green
+                    }
+                    else {
+                        glColor3f(0.0f, 0.5f, 1.0f);  // Blueish
+                    }
+
+                    glVertex2f(10 * cos(theta), 10 * sin(theta));
+                }
+                glEnd();
+
+                // Diagonal lines
+                glColor3f(1.0f, 1.0f, 1.0f);  // White color
+                glBegin(GL_LINES);
+                glVertex2f(0, -10);
+                glVertex2f(0, 10);
+                glVertex2f(-8.66f, -5);  // -8.66 = 10 * cos(60 degrees)
+                glVertex2f(8.66f, 5);
+                glVertex2f(-8.66f, 5);
+                glVertex2f(8.66f, -5);
+                glEnd();
+            }
+            powerUpRotationAngle += 1.0f;  // Adjust the speed of rotation here
+            if (powerUpRotationAngle > 360.0f) {
+                powerUpRotationAngle -= 360.0f;  // Keep angle within the 0-360 degree range
+            }
+        }
+
+        glPopMatrix();
+    }
+}
 void drawPlayer() {
     glPushMatrix();
     glTranslatef(100, playerY, 0);
@@ -215,123 +576,44 @@ void drawPlayer() {
 
     glPopMatrix();
 }
-
-
-void drawBoundaries() {
-    // Upper boundary (4 different primitives)
-    const float lightGray[3] = { 0.8f, 0.8f, 0.8f };
-    const float mediumGray[3] = { 0.6f, 0.6f, 0.6f };
-    const float darkGray[3] = { 0.4f, 0.4f, 0.4f };
-
-    // 1. GL_TRIANGLE_STRIP for solid base with shading
-    glBegin(GL_TRIANGLE_STRIP);
-    for (int i = 0; i <= WINDOW_WIDTH; i += 20) {
-        float t = (float)i / WINDOW_WIDTH;
-        float shade = 0.6f + 0.2f * sin(t * M_PI); // Subtle shading effect
-        glColor3f(shade, shade, shade);
-        glVertex2f(i, WINDOW_HEIGHT - 20 + 5 * sin(i * 0.05f));
-        glColor3f(shade * 0.8f, shade * 0.8f, shade * 0.8f);
-        glVertex2f(i, WINDOW_HEIGHT - 40);
-    }
-    glEnd();
-
-    // 2. GL_POINTS for subtle texture
-    glEnable(GL_POINT_SMOOTH);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glPointSize(2.0f);
-    glBegin(GL_POINTS);
-    for (int i = 0; i < WINDOW_WIDTH; i += 10) {
-        float t = (float)i / WINDOW_WIDTH;
-        float alpha = 0.3f + 0.2f * sin(t * M_PI * 2); // Varying transparency
-        glColor4f(lightGray[0], lightGray[1], lightGray[2], alpha);
-        glVertex2f(i, WINDOW_HEIGHT - 30 + 3 * sin(i * 0.1f));
-    }
-    glEnd();
-    glDisable(GL_POINT_SMOOTH);
-    glDisable(GL_BLEND);
-
-    // 3. GL_LINE_STRIP for subtle curve
-    glBegin(GL_LINE_STRIP);
-    glColor3f(darkGray[0], darkGray[1], darkGray[2]);
-    for (int i = 0; i <= WINDOW_WIDTH; i += 10) {
-        float y = WINDOW_HEIGHT - 35 + 3 * sin(i * 0.03f);
-        glVertex2f(i, y);
-    }
-    glEnd();
-
-    // 4. GL_TRIANGLES for subtle top texture
-    glBegin(GL_TRIANGLES);
-    for (int i = 0; i < WINDOW_WIDTH; i += 40) {
-        float t = (float)i / WINDOW_WIDTH;
-        float shade = 0.7f + 0.1f * sin(t * M_PI * 2); // Subtle shading
-        glColor3f(shade, shade, shade);
-        glVertex2f(i, WINDOW_HEIGHT - 20);
-        glVertex2f(i + 20, WINDOW_HEIGHT - 15);
-        glVertex2f(i + 40, WINDOW_HEIGHT - 20);
-    }
-    glEnd();
-
-    // Lower boundary (4 different primitives)
-
-    const float baseGreen[3] = {0.0f, 0.5f, 0.0f};  // Medium green
-    const float darkGreen[3] = {0.0f, 0.4f, 0.0f};  // Slightly darker green for subtle variation
-    const float lightGreen[3] = {0.0f, 0.6f, 0.0f}; // Slightly lighter green for subtle highlights
-
-    // 1. GL_QUAD_STRIP for solid base
-    glBegin(GL_QUAD_STRIP);
-    for (int i = 0; i <= WINDOW_WIDTH; i += 20) {
-        glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
-        glVertex2f(i, 30);
-        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
-        glVertex2f(i, 0);
-    }
-    glEnd();
-
-    // 2. GL_LINES for subtle texture
-    glBegin(GL_LINES);
-    glColor3f(lightGreen[0], lightGreen[1], lightGreen[2]);
-    for (int i = 0; i < WINDOW_WIDTH; i += 40) {
-        glVertex2f(i, 0);
-        glVertex2f(i + 20, 30);
-    }
-    glEnd();
-
-    // 3. GL_TRIANGLES for subtle shapes
-    glBegin(GL_TRIANGLES);
-    for (int i = 0; i < WINDOW_WIDTH; i += 100) {
-        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
-        glVertex2f(i, 0);
-        glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
-        glVertex2f(i + 25, 20);
-        glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
-        glVertex2f(i + 50, 0);
-    }
-    glEnd();
-
-    // 4. GL_TRIANGLE_FAN for subtle circular details
-    for (int i = 0; i < WINDOW_WIDTH; i += 200) {
-        glBegin(GL_TRIANGLE_FAN);
-        glColor3f(lightGreen[0], lightGreen[1], lightGreen[2]);
-        glVertex2f(i + 50, 15);  // center
-        int segments = 16;
-        for (int j = 0; j <= segments; j++) {
-            float theta = 2.0f * M_PI * (float)j / (float)segments;
-            float x = i + 50 + 10 * cosf(theta);
-            float y = 15 + 10 * sinf(theta);
-            if (j % 2 == 0) {
-                glColor3f(baseGreen[0], baseGreen[1], baseGreen[2]);
-            } else {
-                glColor3f(darkGreen[0], darkGreen[1], darkGreen[2]);
-            }
-            glVertex2f(x, y);
-        }
-        glEnd();
+void drawText(float x, float y, std::string text) {
+    glRasterPos2f(x, y);
+    for (char c : text) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
     }
 }
 
+void updateCloudPosition(float deltaTime) {
+    // Cloud movement speed (adjust as needed)
+    float cloudSpeed = 50.0f;
 
+    // Move the cloud to the right based on deltaTime
+    cloudOffset += cloudSpeed * deltaTime;
 
+    // Reset the cloud position when it moves off the screen (800 is the width, 100 is the cloud's half width)
+    if (cloudOffset > 450.0f) {
+        cloudOffset = -450.0f;  // Reset the cloud to the left side when it goes off the screen
+    }
+}
+void updatePlayerPosition() {
+    if (isJumping) {
+        playerVelocityY += gravity;
+        playerY += playerVelocityY;
+
+        if (playerY <= 50.0f) {
+            playerY = 50.0f;
+            isJumping = false;
+            playerVelocityY = 0.0f;
+        }
+    }
+
+    if (isDucking) {
+        playerY = 30.0f;
+    }
+    else if (!isJumping) {
+        playerY = 50.0f;
+    }
+}
 void updateGameObjects() {
     float currentGameSpeed = gameSpeed;  // Default game speed
 
@@ -358,7 +640,7 @@ void updateGameObjects() {
                 if (it->type == 0 && activePowerUp != INVINCIBILITY) { // Obstacle
                     playerLives--;
                     //isBackgroundMusicPlaying = false;
-                    //playSound("sounds/collision.wav");
+                    playSound("sounds/collision.wav");
                     //isBackgroundMusicPlaying = false;/*
                     //playSound("sounds/background.wav", true);
 
@@ -369,7 +651,7 @@ void updateGameObjects() {
                 else if (it->type == 2) { // Power-up
                     activePowerUp = static_cast<PowerUpType>(rand() % 2);
                     powerUpDuration = 5.0f; // 5 seconds duration
-					//playSound("sounds/powerup.wav");
+                    playSound("sounds/powerup.wav");
                     //playSound("sounds/background.wav", true);
                 }
                 it = gameObjects.erase(it);
@@ -393,182 +675,6 @@ void updateGameObjects() {
         }
     }
 }
-
-void drawGameObjects() {
-    // Iterate through all game objects
-    for (const auto& obj : gameObjects) {
-        glPushMatrix();
-        glTranslatef(obj.x, obj.y, 0);
-
-        if (obj.type == 0) { // Obstacle
-
-
-            // Ensure you enable texturing
-            glEnable(GL_TEXTURE_2D);
-
-            // STEP 1: Render the background
-            glColor3f(1.0f, 1.0f, 1.0f);  // White to ensure texture colors are not tinted
-
-            // STEP 2: Render the obstacle on top of the background
-
-            glBindTexture(GL_TEXTURE_2D, obstacleTexture);  // Bind the obstacle texture
-
-            // Drawing the obstacle
-            glBegin(GL_TRIANGLES);
-            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Left vertex
-            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Right vertex
-            glTexCoord2f(0.5f, 1.0f); glVertex2f(0, 20);     // Top vertex (centered)
-            glEnd();
-
-            glBegin(GL_QUADS);
-            glTexCoord2f(0.0f, 0.0f); glVertex2f(-15, -10);  // Bottom-left vertex
-            glTexCoord2f(1.0f, 0.0f); glVertex2f(15, -10);   // Bottom-right vertex
-            glTexCoord2f(1.0f, 1.0f); glVertex2f(15, -30);   // Bottom-right (lower)
-            glTexCoord2f(0.0f, 1.0f); glVertex2f(-15, -30);  // Bottom-left (lower)
-            glEnd();
-
-            // Unbind the obstacle texture
-            glBindTexture(GL_TEXTURE_2D, 0);
-
-            // Disable 2D texturing after drawing
-            glDisable(GL_TEXTURE_2D);
-
-        }
-        else if (obj.type == 1) { // Collectable
-            glColor3f(1.0f, 1.0f, 0.0f);
-            glBegin(GL_TRIANGLE_FAN);
-            for (int i = 0; i < 360; i += 36) {
-                float theta = i * 3.14159f / 180.0f;
-                glVertex2f(10 * cos(theta), 10 * sin(theta));
-            }
-            glEnd();
-        }
-        else if (obj.type == 2) { // Power-up
-
-            if (activePowerUp == SPEED_BOOST) {
-                //glColor3f(1.0f, 1.0f, 1.0f);
-                //drawText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2 - 30, "SPEED_BOOST Now" );
-                glColor3f(0.0f, 1.0f, 1.0f);
-
-                // Drawing the central square
-                glBegin(GL_QUADS);
-                glVertex2f(-8, -8);
-                glVertex2f(8, -8);
-                glVertex2f(8, 8);
-                glVertex2f(-8, 8);
-                glEnd();
-
-                // Drawing the triangles pointing outwards (4 triangles)
-                glBegin(GL_TRIANGLES);
-                // Top triangle
-                glVertex2f(0, 12);
-                glVertex2f(-5, 5);
-                glVertex2f(5, 5);
-                // Bottom triangle
-                glVertex2f(0, -12);
-                glVertex2f(-5, -5);
-                glVertex2f(5, -5);
-                // Left triangle
-                glVertex2f(-12, 0);
-                glVertex2f(-5, 5);
-                glVertex2f(-5, -5);
-                // Right triangle
-                glVertex2f(12, 0);
-                glVertex2f(5, 5);
-                glVertex2f(5, -5);
-                glEnd();
-
-                // Drawing cross lines through the center
-                glBegin(GL_LINES);
-                glVertex2f(-12, 0);
-                glVertex2f(12, 0);
-                glVertex2f(0, -12);
-                glVertex2f(0, 12);
-                glEnd();
-            }
-            else if (activePowerUp == INVINCIBILITY) {  // Second Power-up: Hexagon with diagonal lines
-                // Set color for the text to bright yellow
-                //glColor3f(1.0f, 1.0f, 0.0f);  // Yellow color
-                //drawText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 - 30, "INVINCIBILITY NOW");  // Center the text better
-
-                // Now change the hexagon and line colors
-
-                // Set a color for the hexagon (gradient-like effect by changing vertex colors)
-                glBegin(GL_POLYGON);
-                for (int i = 0; i < 6; i++) {
-                    float theta = i * 3.14159f / 3.0f;
-
-
-                    if (i % 2 == 0) {
-                        glColor3f(0.0f, 1.0f, 0.0f);  // Green
-                    }
-                    else {
-                        glColor3f(0.0f, 0.5f, 1.0f);  // Blueish
-                    }
-
-                    glVertex2f(10 * cos(theta), 10 * sin(theta));
-                }
-                glEnd();
-
-                // Set color for the diagonal lines (contrasting color, white in this case)
-                glColor3f(1.0f, 1.0f, 1.0f);  // White color
-
-                glBegin(GL_LINES);
-                // Line 1
-                glVertex2f(0, -10);
-                glVertex2f(0, 10);
-                // Line 2
-                glVertex2f(-8.66f, -5);  // -8.66 = 10 * cos(60 degrees)
-                glVertex2f(8.66f, 5);
-                // Line 3
-                glVertex2f(-8.66f, 5);
-                glVertex2f(8.66f, -5);
-                glEnd();
-
-            }
-        }
-
-        glPopMatrix();
-    }
-}
-
-
-void drawHealth() {
-    for (int i = 0; i < playerLives; ++i) {
-        glPushMatrix();
-        glTranslatef(50 + i * 40, WINDOW_HEIGHT - 50, 0);
-
-        glColor3f(1.0f, 0.0f, 0.0f);
-        glBegin(GL_TRIANGLE_FAN);
-        for (int j = 0; j < 360; j++) {
-            float theta = j * 3.14159f / 180.0f;
-            glVertex2f(10 * 16 * pow(sin(theta), 3) / 13,
-                -10 * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 13);
-        }
-        glEnd();
-
-        glPopMatrix();
-    }
-}
-
-void handleKeyPress(unsigned char key, int x, int y) {
-    if (key == ' ' && !isJumping) {
-        //playSound("sounds/jump.wav");
-        isJumping = true;
-        playerVelocityY = jumpStrength;
-    }
-
-    if (key == 's') {
-        isDucking = true;
-    }
-}
-
-void handleKeyRelease(unsigned char key, int x, int y) {
-    if (key == 's') {
-        isDucking = false;
-    }
-}
-
 void update(int value) {
     if (gameRunning) {
         gameTime -= 0.016f; // Assuming 60 FPS
@@ -588,7 +694,16 @@ void update(int value) {
         glutTimerFunc(16, update, 0);
     }
 }
-// to draw the game objects and player
+
+void spawnGameObject(int type) {
+    GameObject obj;
+    obj.x = WINDOW_WIDTH + 50;
+    obj.y = 50 + rand() % 100;
+    obj.active = true;
+    obj.type = type;
+    gameObjects.push_back(obj);
+}
+
 void render() {
     glClear(GL_COLOR_BUFFER_BIT);
     glColor3f(1.0f, 1.0f, 1.0f);
@@ -606,10 +721,14 @@ void render() {
     glPopMatrix();
 
     if (gameRunning) {
+        float deltaTime = calculateDeltaTime();
+        updateCloudPosition(deltaTime);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         drawBoundaries();
         drawPlayer();
         drawGameObjects();
         drawHealth();
+        drawCloud();
 
         glColor3f(1.0f, 1.0f, 0.0f);
         drawText(WINDOW_WIDTH - 150, WINDOW_HEIGHT - 30, "Score: " + std::to_string(score));
@@ -639,8 +758,8 @@ void render() {
     }
 
     glutSwapBuffers();
+    //glfwPollEvents();
 }
-
 
 void initGame() {
     srand(static_cast<unsigned int>(time(0)));
@@ -656,8 +775,14 @@ void initGame() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    loadBMP(&obstacleTexture, "textures/player.bmp", false);
+    loadBMP(&playerTexture, "textures/player.bmp", false);
     glBindTexture(GL_TEXTURE_2D, playerTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    loadBMP(&cloudTexture, "textures/cloud.png", false);
+    glBindTexture(GL_TEXTURE_2D, cloudTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -671,21 +796,6 @@ void initGame() {
     gameRunning = true;
 }
 
-void drawText(float x, float y, std::string text) {
-    glRasterPos2f(x, y);
-    for (char c : text) {
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
-    }
-}
-
-void spawnGameObject(int type) {
-    GameObject obj;
-    obj.x = WINDOW_WIDTH + 50;
-    obj.y = 50 + rand() % 100;
-    obj.active = true;
-    obj.type = type;
-    gameObjects.push_back(obj);
-}
 
 int main(int argc, char** argv) {
     glutInit(&argc, argv);

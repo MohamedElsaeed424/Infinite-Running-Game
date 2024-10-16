@@ -18,12 +18,12 @@ GLuint backgroundTexture;
 GLuint obstacleTexture;
 GLuint playerTexture;
 GLuint cloudTexture;
-std::vector<GameObject> gameObjects;
 struct GameObject {
     float x, y;
     bool active;
     int type; // 0: obstacle, 1: collectable, 2: power-up
 };
+std::vector<GameObject> gameObjects;
 std::chrono::time_point<std::chrono::steady_clock> lastFrameTime;
 
 const int WINDOW_WIDTH = 800;
@@ -45,18 +45,27 @@ bool isBackgroundMusicPlaying = false;
 int rep = 1;
 PowerUpType activePowerUp = SPEED_BOOST;
 float powerUpDuration = 0.0f;
-static float cloudOffset = -450.0f;
-double lastFrameTime = 0.0;
-float cloudOffset = -450.0f;  // Starting position of the cloud, off-screen to the left
+static float cloudOffset = 1000.0f;
+float backgroundColor[3] = { 1.0f, 1.0f, 1.0f };
+bool isFlashing = false;
+int flashCounter = 0;
+const int maxFlashes = 10;  // Number of frames to flash
+bool flashRed = true;  // Toggles between red and white
+
+static float cloudOffsets[3] = { 1000.0f, 1200.0f, 1400.0f };  // Start offsets for clouds
+float cloudSpeeds[3] = { 10.0f, 10.0f, 13.0f };  // Speeds for the clouds
+float cloudYPositions[3] = { 500.0f, 400.0f, 300.0f };  // Y positions for each cloud
+
+static float messageOpacity = 0.0f;  // Control the fading effect for messages
+bool isGameOver = false;  // Track game over state
+bool isGameWon = false;   // Track game won state
 
 
-void drawCloud();
-void updateCloudPosition(float deltaTime);
-float calculateDeltaTime();
+void drawClouds();
+void updateCloudPositions();
 void updatePlayerPosition();
 LPCWSTR convertToLPCWSTR(const char* charArray);
-void playSound(const char* filename, bool loop = false);
-void stopBackgroundMusic();
+void playSound(const char* filename, bool loop);
 void drawPlayer();
 void drawBoundaries();
 void updateGameObjects();
@@ -69,13 +78,8 @@ void render();
 void initGame();
 void drawText(float x, float y, std::string text);
 void spawnGameObject(int type);
-
-float calculateDeltaTime() {
-    auto currentTime = std::chrono::steady_clock::now();
-    std::chrono::duration<float> elapsedTime = currentTime - lastFrameTime;
-    lastFrameTime = currentTime;
-    return elapsedTime.count();  // Return time in seconds
-}
+void handleFlashing();
+void drawFancyText(float x, float y, std::string text, float scale);
 
 LPCWSTR convertToLPCWSTR(const char* charArray) {
     size_t newSize = strlen(charArray) + 1;
@@ -83,7 +87,7 @@ LPCWSTR convertToLPCWSTR(const char* charArray) {
     mbstowcs(wString, charArray, newSize); // Convert to wide character
     return wString;
 }
-void playSound(const char* filename, bool loop = false) {
+void playSound(const char* filename, bool loop) {
     LPCWSTR wideFilename = convertToLPCWSTR(filename);
 
     if (loop && !isBackgroundMusicPlaying) {
@@ -100,13 +104,9 @@ void playSound(const char* filename, bool loop = false) {
 }
 
 
-void stopBackgroundMusic() {
-    PlaySound(NULL, NULL, 0); // Stops the sound
-    isBackgroundMusicPlaying = false; // Reset the flag
-}
 void handleKeyPress(unsigned char key, int x, int y) {
     if (key == ' ' && !isJumping) {
-        //playSound("sounds/jump.wav");
+        playSound("sounds/jump.wav",false);
         isJumping = true;
         playerVelocityY = jumpStrength;
     }
@@ -121,30 +121,32 @@ void handleKeyRelease(unsigned char key, int x, int y) {
     }
 }
 
-void drawCloud() {
-    // Bind the cloud texture
+void drawClouds() {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, cloudTexture);
+    glColor3f(1.0f, 1.0f, 1.0f);  // Ensure cloud color is white for proper texture rendering
 
-    // Push the current matrix to preserve transformations
-    glPushMatrix();
+    // Draw 3 clouds with different positions
+    for (int i = 0; i < 3; i++) {
+        glPushMatrix();
 
-    // Translate the cloud based on the cloudOffset value
-    glTranslatef(cloudOffset, 100.0f, 0.0f);  // Move horizontally, keep vertical position fixed
+        // Translate each cloud based on its offset and vertical position
+        glTranslatef(cloudOffsets[i], cloudYPositions[i], 0.0f);
 
-    // Draw the cloud as a quad with texture
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f); glVertex2f(-50, -30);  // Bottom-left corner
-    glTexCoord2f(1.0f, 0.0f); glVertex2f(50, -30);   // Bottom-right corner
-    glTexCoord2f(1.0f, 1.0f); glVertex2f(50, 30);    // Top-right corner
-    glTexCoord2f(0.0f, 1.0f); glVertex2f(-50, 30);   // Top-left corner
-    glEnd();
+        // Draw the cloud as a quad with texture
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f); glVertex2f(-50, -30);  // Bottom-left corner
+        glTexCoord2f(1.0f, 0.0f); glVertex2f(50, -30);   // Bottom-right corner
+        glTexCoord2f(1.0f, 1.0f); glVertex2f(50, 30);    // Top-right corner
+        glTexCoord2f(0.0f, 1.0f); glVertex2f(-50, 30);   // Top-left corner
+        glEnd();
 
-    // Pop the matrix to restore the previous transformations
-    glPopMatrix();
+        glPopMatrix();
+    }
 
-    // Unbind the texture
+    // Disable texturing
     glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_TEXTURE_2D);
 }
 void drawBoundaries() {
     // Upper boundary (4 different primitives)
@@ -582,17 +584,54 @@ void drawText(float x, float y, std::string text) {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
     }
 }
+void drawFancyText(float x, float y, std::string text, float scale) {
+    glPushMatrix();
+    glTranslatef(x, y, 0);
+    glScalef(scale, scale, 1.0f);  // Scale the text to make it larger
+    drawText(0, 0, text);
+    glPopMatrix();
+}
 
-void updateCloudPosition(float deltaTime) {
-    // Cloud movement speed (adjust as needed)
-    float cloudSpeed = 50.0f;
 
-    // Move the cloud to the right based on deltaTime
-    cloudOffset += cloudSpeed * deltaTime;
+void handleFlashing() {
+    if (isFlashing) {
+        if (flashCounter < maxFlashes) {
+            if (flashCounter % 2 == 0) {
+                // Flash red
+                backgroundColor[0] = 1.0f;  // Red
+                backgroundColor[1] = 0.0f;  // Green
+                backgroundColor[2] = 0.0f;  // Blue
+            }
+            else {
+                // Flash white
+                backgroundColor[0] = 1.0f;  // Red
+                backgroundColor[1] = 1.0f;  // Green
+                backgroundColor[2] = 1.0f;  // Blue
+            }
 
-    // Reset the cloud position when it moves off the screen (800 is the width, 100 is the cloud's half width)
-    if (cloudOffset > 450.0f) {
-        cloudOffset = -450.0f;  // Reset the cloud to the left side when it goes off the screen
+            // Increment flash counter
+            flashCounter++;
+        }
+        else {
+            // Stop flashing after maxFlashes frames
+            isFlashing = false;
+            // Reset background to default color (for example, white)
+            backgroundColor[0] = 1.0f;
+            backgroundColor[1] = 1.0f;
+            backgroundColor[2] = 1.0f;
+        }
+    }
+}
+
+void updateCloudPositions() {
+    for (int i = 0; i < 3; i++) {
+        // Move each cloud to the left based on its individual speed
+        cloudOffsets[i] -= cloudSpeeds[i];
+
+        // Reset the cloud position when it moves off the screen
+        if (cloudOffsets[i] < -100.0f) {  // Assuming the cloud's width is 100
+            cloudOffsets[i] = 1000.0f;  // Reset cloud to the right side of the screen
+        }
     }
 }
 void updatePlayerPosition() {
@@ -620,13 +659,9 @@ void updateGameObjects() {
     // Check if speed boost is active and modify speed accordingly
     if (activePowerUp == SPEED_BOOST && powerUpDuration > 0) {
         gameSpeed *= 1.0002f;  // Increase game speed by 50% during speed boost
-        glColor3f(1.0f, 1.0f, 1.0f);
-        drawText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2 - 30, "current game speed = " + std::to_string(currentGameSpeed));
     }
     if (powerUpDuration < 0) {
         gameSpeed = currentGameSpeed;  // Reset game speed to default
-        glColor3f(1.0f, 0.0f, 1.0f);
-        drawText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2 - 30, "current game speed = " + std::to_string(currentGameSpeed));
     }
     for (auto it = gameObjects.begin(); it != gameObjects.end();) {
         it->x -= gameSpeed;
@@ -637,21 +672,22 @@ void updateGameObjects() {
         else {
             // Collision detection
             if (it->x < 110 && it->x > 90 && playerY < it->y + 20 && playerY + 30 > it->y) {
-                if (it->type == 0 && activePowerUp != INVINCIBILITY) { // Obstacle
+                if (it->type == 0 && activePowerUp != INVINCIBILITY) { // Obstacle collision
                     playerLives--;
-                    //isBackgroundMusicPlaying = false;
-                    playSound("sounds/collision.wav");
-                    //isBackgroundMusicPlaying = false;/*
-                    //playSound("sounds/background.wav", true);
+                    playSound("sounds/collision.wav", false);
 
+                    // Start the flashing effect
+                    isFlashing = true;
+                    flashCounter = 0;  // Reset the flash counter
                 }
                 else if (it->type == 1) { // Collectable
                     score += 10;
+					playSound("sounds/collectable.wav", false);
                 }
                 else if (it->type == 2) { // Power-up
                     activePowerUp = static_cast<PowerUpType>(rand() % 2);
                     powerUpDuration = 5.0f; // 5 seconds duration
-                    playSound("sounds/powerup.wav");
+                    playSound("sounds/powerup.wav",false);
                     //playSound("sounds/background.wav", true);
                 }
                 it = gameObjects.erase(it);
@@ -665,7 +701,7 @@ void updateGameObjects() {
     // Spawn new objects
     if (rand() % 100 < 2) spawnGameObject(0); // Obstacle
     if (rand() % 100 < 1) spawnGameObject(1); // Collectable
-    if (rand() % 1000 < 1) spawnGameObject(2); // Power-up
+    if (rand() % 800 < 1) spawnGameObject(2); // Power-up
 
     // Update power-up duration
     if (powerUpDuration > 0) {
@@ -679,8 +715,10 @@ void update(int value) {
     if (gameRunning) {
         gameTime -= 0.016f; // Assuming 60 FPS
         backgroundOffset -= scrollSpeed;
+        updateCloudPositions();
         updatePlayerPosition();
         updateGameObjects();
+        handleFlashing();
         gameSpeed += 0.003f; // Gradually increase game speed
         if (backgroundOffset <= -WINDOW_WIDTH) {
             backgroundOffset = 0.0f;
@@ -707,10 +745,10 @@ void spawnGameObject(int type) {
 void render() {
     glClear(GL_COLOR_BUFFER_BIT);
     glColor3f(1.0f, 1.0f, 1.0f);
+    glColor3f(backgroundColor[0], backgroundColor[1], backgroundColor[2]);
     glPushMatrix();
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, backgroundTexture);
-   
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f); glVertex3f(0, 0, 0);
     glTexCoord2f(rep, 0.0f); glVertex3f(800, 0, 0);
@@ -719,16 +757,12 @@ void render() {
     glEnd();
     glBindTexture(GL_TEXTURE_2D, 0);
     glPopMatrix();
-
     if (gameRunning) {
-        float deltaTime = calculateDeltaTime();
-        updateCloudPosition(deltaTime);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         drawBoundaries();
         drawPlayer();
         drawGameObjects();
         drawHealth();
-        drawCloud();
+        drawClouds();
 
         glColor3f(1.0f, 1.0f, 0.0f);
         drawText(WINDOW_WIDTH - 150, WINDOW_HEIGHT - 30, "Score: " + std::to_string(score));
@@ -741,26 +775,48 @@ void render() {
         }
     }
     else {
-        if (playerLives <= 0) {
-            playSound("sounds/lose.wav");
-            glColor3f(1.0f, 0.0f, 0.0f);
-            drawText(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT / 2, "Game Over");
-            glColor3f(1.0f, 1.0f, 1.0f);
-            drawText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2 - 30, "Final Score: " + std::to_string(score));
-        }   
-        else {
-            playSound("sounds/win.wav");
-            glColor3f(0.0f, 1.0f, 0.0f);
-            drawText(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT / 2, "Good job !"); // if the player wins good j
-            glColor3f(1.0f, 1.0f, 1.0f);
-            drawText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2 - 30, "Final Score: " + std::to_string(score));
+        if (messageOpacity < 1.0f) {
+            messageOpacity += 0.01f;  // Slowly increase opacity
         }
+
+        // If the player has lost
+        if (playerLives <= 0) {
+            playSound("sounds/lose.wav", false);
+
+            // Draw "Game Over" message with a dark red effect
+            glColor4f(1.0f, 1.0f, 1.0f, messageOpacity);  // Dark red text with fading effect
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 80, "Game Over!", 2.0f);  // Larger font size
+
+            // Draw the final score with dark teal color
+            glColor4f(0.0f, 0.5f, 0.5f, messageOpacity);  // Dark teal fading text
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 40, "Final Score: " + std::to_string(score), 1.5f);
+
+            // Additional descriptive message with dark blue-green color
+            glColor4f(0.11f, 0.4f, 0.7f, messageOpacity);  // Blue-green color fading text
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 10, "Better luck next time!", 1.0f);
+        }
+        // If the player has won
+        else {
+            playSound("sounds/win.wav", false);
+
+            // Draw "Good Job" message with a dark green glowing effect
+            glColor4f(0.0f, 0.7f, 0.0f, messageOpacity);  // Dark green text with fading effect
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 80, "Good Job!", 2.0f);
+
+            // Draw the final score with a medium teal color
+            glColor4f(0.0f, 0.6f, 0.6f, messageOpacity);  // Medium teal fading text
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 40, "Final Score: " + std::to_string(score), 1.5f);
+
+            // Additional descriptive message with a cool dark blue-green color
+            glColor4f(0.0f, 0.5f, 0.8f, messageOpacity);  // Cool blue-green color fading text
+            drawFancyText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 10, "Congratulations, You Won!", 1.0f);
+        }
+
     }
 
     glutSwapBuffers();
     //glfwPollEvents();
 }
-
 void initGame() {
     srand(static_cast<unsigned int>(time(0)));
     loadBMP(&backgroundTexture, "textures/background.bmp", false);
@@ -781,7 +837,7 @@ void initGame() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    loadBMP(&cloudTexture, "textures/cloud.png", false);
+    loadBMP(&cloudTexture, "textures/cloud.bmp", false);
     glBindTexture(GL_TEXTURE_2D, cloudTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

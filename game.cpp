@@ -52,9 +52,10 @@ int flashCounter = 0;
 const int maxFlashes = 10;  // Number of frames to flash
 bool flashRed = true;  // Toggles between red and white
 
-static float cloudOffsets[3] = { 1000.0f, 1200.0f, 1400.0f };  // Start offsets for clouds
-float cloudSpeeds[3] = { 10.0f, 10.0f, 13.0f };  // Speeds for the clouds
-float cloudYPositions[3] = { 500.0f, 400.0f, 300.0f };  // Y positions for each cloud
+float cloudOffsets[3] = { -100.0f, 100.0f, 100.0f };
+float cloudSpeeds[3] = { 10.0f, 11.50f, 10.0f };  // Speeds for the clouds
+float cloudYPositions[3] = { 500.0f, 400.0f, 500.0f };  // Y positions for each cloud
+
 
 static float messageOpacity = 0.0f;  // Control the fading effect for messages
 bool isGameOver = false;  // Track game over state
@@ -102,7 +103,6 @@ void playSound(const char* filename, bool loop) {
 
     delete[] wideFilename; // Clean up memory
 }
-
 
 void handleKeyPress(unsigned char key, int x, int y) {
     if (key == ' ' && !isJumping) {
@@ -262,23 +262,41 @@ void drawBoundaries() {
         glEnd();
     }
 }
+
+void drawHeart(float x, float y, float size) {
+    glPushMatrix();
+    glTranslatef(x, y, 0);
+    glScalef(size, size, 1.0f);
+
+    glColor3f(1.0f, 0.0f, 0.0f); // Red color for the heart
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(0.0f, 0.0f); // Center of the heart
+    for (int i = 0; i <= 360; ++i) {
+        float theta = i * 3.14159f / 180.0f;
+        float xPos = 16 * pow(sin(theta), 3);
+        float yPos = (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta));
+        glVertex2f(xPos, yPos);
+    }
+    glEnd();
+
+    glPopMatrix();
+}
+
 void drawHealth() {
+    float heartSize = 0.6f; // Larger hearts (increase this value for even bigger hearts)
+    float spacing = 40.0f;
+
     for (int i = 0; i < playerLives; ++i) {
-        glPushMatrix();
-        glTranslatef(50 + i * 40, WINDOW_HEIGHT - 50, 0);
+        float xPosition = 50 + i * spacing;
+        float yPosition = WINDOW_HEIGHT - 70;
 
-        glColor3f(1.0f, 0.0f, 0.0f);
-        glBegin(GL_TRIANGLE_FAN);
-        for (int j = 0; j < 360; j++) {
-            float theta = j * 3.14159f / 180.0f;
-            glVertex2f(10 * 16 * pow(sin(theta), 3) / 13,
-                -10 * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 13);
-        }
-        glEnd();
-
-        glPopMatrix();
+        // Draw each heart at the specified position
+        drawHeart(xPosition, yPosition, heartSize);
     }
 }
+
+
+
 void drawGameObjects() {
     // Iterate through all game objects
     for (const auto& obj : gameObjects) {
@@ -848,7 +866,7 @@ void initGame() {
     score = 0;
     playerLives = 5;
     gameSpeed = 10.0f;
-    gameTime = 10.0f;
+    gameTime = 50.0f;
     gameRunning = true;
 }
 

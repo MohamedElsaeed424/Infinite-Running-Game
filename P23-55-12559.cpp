@@ -13,7 +13,6 @@
 
 #define M_PI 3.14159265358979323846
 
-enum PowerUpType { SPEED_BOOST, INVINCIBILITY };
 GLuint backgroundTexture;
 GLuint obstacleTexture;
 GLuint playerTexture;
@@ -45,7 +44,7 @@ float backgroundOffset = 0.0f;
 const float scrollSpeed = 2.0f;
 bool isBackgroundMusicPlaying = false;
 int rep = 1;
-PowerUpType activePowerUp = SPEED_BOOST;
+std::string activePowerUp = "SPEED_BOOST";
 float powerUpDuration = 0.0f;
 static float cloudOffset = 1000.0f;
 float backgroundColor[3] = { 1.0f, 1.0f, 1.0f };
@@ -53,11 +52,9 @@ bool isFlashing = false;
 int flashCounter = 0;
 const int maxFlashes = 10;  
 bool flashRed = true; 
-
 float cloudOffsets[3] = { -100.0f, 100.0f, 100.0f };
 float cloudSpeeds[3] = { 10.0f, 11.50f, 10.0f };  
 float cloudYPositions[3] = { 500.0f, 400.0f, 500.0f };  
-
 static float messageOpacity = 0.0f;  
 bool isGameOver = false; 
 bool isGameWon = false;   
@@ -131,14 +128,11 @@ void handleKeyPress(unsigned char key, int x, int y) {
         isDucking = true;
     }
 }
-
 void handleKeyRelease(unsigned char key, int x, int y) {
     if (key == 's') {
         isDucking = false;
     }
 }
-
-
 void drawClouds() {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, cloudTexture);
@@ -280,7 +274,6 @@ void drawBoundaries() {
         glEnd();
     }
 }
-
 void drawHeart(float x, float y, float size) {
     glPushMatrix();
     glTranslatef(x, y, 0);
@@ -299,7 +292,6 @@ void drawHeart(float x, float y, float size) {
 
     glPopMatrix();
 }
-
 void drawHealth() {
     float heartSize = 0.6f; // Larger hearts (increase this value for even bigger hearts)
     float spacing = 40.0f;
@@ -312,9 +304,6 @@ void drawHealth() {
         drawHeart(xPosition, yPosition, heartSize);
     }
 }
-
-
-
 void drawGameObjects() {
     // Iterate through all game objects
     for (const auto& obj : gameObjects) {
@@ -429,7 +418,8 @@ void drawGameObjects() {
             //glTranslatef(obj.x, obj.y, 0);
             glRotatef(powerUpRotationAngle, 0.0f, 0.0f, 1.0f);
 
-            if (activePowerUp == SPEED_BOOST) {
+            if (activePowerUp == "SPEED_BOOST") {
+				printf("Speed Boost\n");
                 glColor3f(0.0f, 1.0f, 1.0f);
 
                 // Drawing the central square
@@ -468,7 +458,8 @@ void drawGameObjects() {
                 glVertex2f(0, 12);
                 glEnd();
             }
-            else if (activePowerUp == INVINCIBILITY) {
+            else {
+                printf("Invisiblitiliy\n");
                 // Second Power-up: Hexagon with diagonal lines
                 glBegin(GL_POLYGON);
                 for (int i = 0; i < 6; i++) {
@@ -693,7 +684,7 @@ void updateGameObjects() {
     float currentGameSpeed = gameSpeed;  // Default game speed
 
     // Check if speed boost is active and modify speed accordingly
-    if (activePowerUp == SPEED_BOOST && powerUpDuration > 0) {
+    if (activePowerUp == "SPEED_BOOST" && powerUpDuration > 0) {
         gameSpeed *= 1.0002f;  // Increase game speed by 50% during speed boost
     }
     if (powerUpDuration < 0) {
@@ -708,7 +699,7 @@ void updateGameObjects() {
         else {
             // Collision detection
             if (it->x < 110 && it->x > 90 && playerY < it->y + 20 && playerY + 30 > it->y) {
-                if (it->type == 0 && activePowerUp != INVINCIBILITY && !it->hasCollided) { // Obstacle collision
+                if (it->type == 0 && activePowerUp != "INVINCIBILITY" && !it->hasCollided) { // Obstacle collision
                     playerLives--;
                     playSound("sounds/collision.wav", false);
                     it->hasCollided = true;
@@ -727,13 +718,22 @@ void updateGameObjects() {
                     continue;
                 }
                 else if (it->type == 2) { // Power-up
-                    activePowerUp = static_cast<PowerUpType>(rand() % 2);
+                    // Randomly choose between SPEED_BOOST and INVINCIBILITY
+                    int powerUpChoice = rand() % 2;
+                    if (powerUpChoice == 0) {
+                        activePowerUp = "SPEED_BOOST";
+                    }
+                    else {
+                        activePowerUp = "INVINCIBILITY";
+                    }
+
                     powerUpDuration = 5.0f; // 5 seconds duration
-                    playSound("sounds/powerup.wav",false);
-                    //playSound("sounds/background.wav", true);
-                    it = gameObjects.erase(it);
+                    playSound("sounds/powerup.wav", false);
+
+                    it = gameObjects.erase(it);  // Remove the power-up after collection
                     continue;
                 }
+
             }
             else {
                 ++it;
@@ -750,7 +750,7 @@ void updateGameObjects() {
     if (powerUpDuration > 0) {
         powerUpDuration -= 0.016f; // Assuming 60 FPS
         if (powerUpDuration <= 0) {
-            activePowerUp = SPEED_BOOST; // Reset to default
+            activePowerUp = "SPEED_BOOST"; // Reset to default
         }
     }
 }
@@ -826,7 +826,8 @@ void render() {
         drawText(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT - 30, "Time: " + std::to_string((int)gameTime));
 
         if (powerUpDuration > 0) {
-            std::string powerUpText = (activePowerUp == SPEED_BOOST) ? "Speed Boost" : "Invincibility";
+            std::cout << "SPEED_BOOST: " << (activePowerUp == "SPEED_BOOST" ? "true" : "false") << std::endl;
+            std::string powerUpText = (activePowerUp == "SPEED_BOOST") ? "Speed Boost" : "Invincibility";
             drawText(10, WINDOW_HEIGHT - 80, powerUpText + ": " + std::to_string((int)powerUpDuration));
         }
     }

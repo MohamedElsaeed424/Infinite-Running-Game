@@ -87,6 +87,18 @@ LPCWSTR convertToLPCWSTR(const char* charArray) {
     mbstowcs(wString, charArray, newSize); // Convert to wide character
     return wString;
 }
+void playBackgroundMusic() {
+    mciSendString(L"open \"D:\\GUC\\Semester 7\\Graphics\\GameProject\\sounds\\background.wav\" type mpegvideo alias bgMusic", NULL, 0, NULL);
+    mciSendString(L"play bgMusic repeat", NULL, 0, NULL);
+}
+void stopBackgroundMusic() {
+    // Stop the music associated with the alias "bgMusic"
+    mciSendString(L"stop bgMusic", NULL, 0, NULL);
+
+    // Close the music resource
+    mciSendString(L"close bgMusic", NULL, 0, NULL);
+}
+
 void playSound(const char* filename, bool loop) {
     LPCWSTR wideFilename = convertToLPCWSTR(filename);
 
@@ -835,6 +847,7 @@ void render() {
     glBindTexture(GL_TEXTURE_2D, 0);
     glPopMatrix();
     if (gameRunning) {
+        playBackgroundMusic();
         drawBoundaries();
         drawPlayer();
         drawGameObjects();
@@ -853,6 +866,7 @@ void render() {
         }
     }
     else {
+		stopBackgroundMusic();
         if (messageOpacity < 1.0f) {
             messageOpacity += 0.01f;  // Slowly increase opacity
         }
@@ -947,10 +961,9 @@ int main(int argc, char** argv) {
     glLoadIdentity();
     gluOrtho2D(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT);
     glMatrixMode(GL_MODELVIEW);
- 
-
+    
+    
     initGame();
-    playSound("sounds/background.wav", true);
 
     glutMainLoop();
     return 0;

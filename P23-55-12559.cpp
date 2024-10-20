@@ -58,6 +58,7 @@ float cloudYPositions[3] = { 500.0f, 400.0f, 500.0f };
 static float messageOpacity = 0.0f;  
 bool isGameOver = false; 
 bool isGameWon = false;   
+const float minDistance = 50.0f;
 
 
 void drawClouds();
@@ -418,8 +419,8 @@ void drawGameObjects() {
             //glTranslatef(obj.x, obj.y, 0);
             glRotatef(powerUpRotationAngle, 0.0f, 0.0f, 1.0f);
 
-            if (activePowerUp == "SPEED_BOOST") {
-				printf("Speed Boost\n");
+            if (activePowerUp == "INVINCIBILITY") {
+				printf("Invisiblitiliy\n");
                 glColor3f(0.0f, 1.0f, 1.0f);
 
                 // Drawing the central square
@@ -459,7 +460,7 @@ void drawGameObjects() {
                 glEnd();
             }
             else {
-                printf("Invisiblitiliy\n");
+                printf("speed Boost\n");
                 // Second Power-up: Hexagon with diagonal lines
                 glBegin(GL_POLYGON);
                 for (int i = 0; i < 6; i++) {
@@ -649,7 +650,6 @@ void handleFlashing() {
         }
     }
 }
-
 void updateCloudPositions() {
     for (int i = 0; i < 3; i++) {
         // Move each cloud to the left based on its individual speed
@@ -791,10 +791,31 @@ void update(int value) {
 
 void spawnGameObject(int type) {
     GameObject obj;
-    obj.x = WINDOW_WIDTH + 50;
-    obj.y = 50 + rand() % 100;
-    obj.active = true;
-    obj.type = type;
+    bool positionIsValid = false;
+
+    // Repeat until we find a valid non-overlapping position
+    while (!positionIsValid) {
+        obj.x = WINDOW_WIDTH + 50;  // Start just off the screen
+        obj.y = 50 + rand() % 100;  // Random y position
+        obj.active = true;
+        obj.type = type;
+
+        positionIsValid = true;  // Assume the position is valid initially
+
+        // Check for overlap with other game objects
+        for (const auto& otherObj : gameObjects) {
+            float distanceX = abs(obj.x - otherObj.x);
+            float distanceY = abs(obj.y - otherObj.y);
+
+            // If the objects are too close, mark the position as invalid
+            if (distanceX < minDistance && distanceY < minDistance) {
+                positionIsValid = false;  // Found overlap, break the loop and retry
+                continue;
+            }
+        }
+    }
+
+    // Add the new object to the list once a valid position is found
     gameObjects.push_back(obj);
 }
 

@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <ctime>
 #include "TextureBuilder.h"
-#include <glut.h>
+#include <glut.h>   
 #include <windows.h>
 #include <mmsystem.h>
 #include <chrono>
@@ -22,6 +22,7 @@ struct GameObject {
     float x, y;
     bool active;
     int type; // 0: obstacle, 1: collectable, 2: power-up
+    bool hasCollided=false;
 };
 std::vector<GameObject> gameObjects;
 std::chrono::time_point<std::chrono::steady_clock> lastFrameTime;
@@ -32,6 +33,7 @@ int score = 0;
 float playerY = 50.0f;
 float playerVelocityY = 0.0f;
 int playerLives = 5;
+bool isPaused = false;
 float gravity = -0.5f;
 bool isJumping = false;
 const float jumpStrength = 12.0f;
@@ -49,17 +51,16 @@ static float cloudOffset = 1000.0f;
 float backgroundColor[3] = { 1.0f, 1.0f, 1.0f };
 bool isFlashing = false;
 int flashCounter = 0;
-const int maxFlashes = 10;  // Number of frames to flash
-bool flashRed = true;  // Toggles between red and white
+const int maxFlashes = 10;  
+bool flashRed = true; 
 
 float cloudOffsets[3] = { -100.0f, 100.0f, 100.0f };
-float cloudSpeeds[3] = { 10.0f, 11.50f, 10.0f };  // Speeds for the clouds
-float cloudYPositions[3] = { 500.0f, 400.0f, 500.0f };  // Y positions for each cloud
+float cloudSpeeds[3] = { 10.0f, 11.50f, 10.0f };  
+float cloudYPositions[3] = { 500.0f, 400.0f, 500.0f };  
 
-
-static float messageOpacity = 0.0f;  // Control the fading effect for messages
-bool isGameOver = false;  // Track game over state
-bool isGameWon = false;   // Track game won state
+static float messageOpacity = 0.0f;  
+bool isGameOver = false; 
+bool isGameWon = false;   
 
 
 void drawClouds();
@@ -103,10 +104,25 @@ void playSound(const char* filename, bool loop) {
 
     delete[] wideFilename; // Clean up memory
 }
-
 void handleKeyPress(unsigned char key, int x, int y) {
+    // Check if the game is paused and resume on jump or duck
+    if (isPaused) {
+        if (key == ' ' && !isJumping) {  // Jump key pressed
+            playSound("sounds/jump.wav", false);
+            isJumping = true;
+            playerVelocityY = jumpStrength;
+            isPaused = false;  // Resume the game
+        }
+        if (key == 's') {  // Duck key pressed
+            isDucking = true;
+            isPaused = false;  // Resume the game
+        }
+        return;  // Don't process any further key presses while paused
+    }
+
+    // Normal game controls (when not paused)
     if (key == ' ' && !isJumping) {
-        playSound("sounds/jump.wav",false);
+        playSound("sounds/jump.wav", false);
         isJumping = true;
         playerVelocityY = jumpStrength;
     }
@@ -115,11 +131,13 @@ void handleKeyPress(unsigned char key, int x, int y) {
         isDucking = true;
     }
 }
+
 void handleKeyRelease(unsigned char key, int x, int y) {
     if (key == 's') {
         isDucking = false;
     }
 }
+
 
 void drawClouds() {
     glEnable(GL_TEXTURE_2D);
@@ -288,7 +306,7 @@ void drawHealth() {
 
     for (int i = 0; i < playerLives; ++i) {
         float xPosition = 50 + i * spacing;
-        float yPosition = WINDOW_HEIGHT - 70;
+        float yPosition = WINDOW_HEIGHT - 20;
 
         // Draw each heart at the specified position
         drawHeart(xPosition, yPosition, heartSize);
@@ -690,25 +708,32 @@ void updateGameObjects() {
         else {
             // Collision detection
             if (it->x < 110 && it->x > 90 && playerY < it->y + 20 && playerY + 30 > it->y) {
-                if (it->type == 0 && activePowerUp != INVINCIBILITY) { // Obstacle collision
+                if (it->type == 0 && activePowerUp != INVINCIBILITY && !it->hasCollided) { // Obstacle collision
                     playerLives--;
                     playSound("sounds/collision.wav", false);
+                    it->hasCollided = true;
 
                     // Start the flashing effect
                     isFlashing = true;
                     flashCounter = 0;  // Reset the flash counter
+
+                    // Pause the game after collision
+                    isPaused = true;
                 }
                 else if (it->type == 1) { // Collectable
                     score += 10;
 					playSound("sounds/collectable.wav", false);
+                    it = gameObjects.erase(it);
+                    continue;
                 }
                 else if (it->type == 2) { // Power-up
                     activePowerUp = static_cast<PowerUpType>(rand() % 2);
                     powerUpDuration = 5.0f; // 5 seconds duration
                     playSound("sounds/powerup.wav",false);
                     //playSound("sounds/background.wav", true);
+                    it = gameObjects.erase(it);
+                    continue;
                 }
-                it = gameObjects.erase(it);
             }
             else {
                 ++it;
@@ -731,25 +756,38 @@ void updateGameObjects() {
 }
 void update(int value) {
     if (gameRunning) {
-        gameTime -= 0.016f; // Assuming 60 FPS
+        // If the game is paused, don't update anything and wait for player input
+        if (isPaused) {
+            glutTimerFunc(16, update, 0);  // Keep calling update to check for resuming the game
+            return;  // Don't process further game updates if paused
+        }
+
+        // Normal game updates if not paused
+        gameTime -= 0.016f;  // Assuming 60 FPS
         backgroundOffset -= scrollSpeed;
         updateCloudPositions();
-        updatePlayerPosition();
+        updatePlayerPosition();  // Make sure this uses playerX and playerY
         updateGameObjects();
         handleFlashing();
-        gameSpeed += 0.003f; // Gradually increase game speed
+
+        // Gradually increase game speed over time
+        gameSpeed += 0.003f;
+
+        // Reset the background position
         if (backgroundOffset <= -WINDOW_WIDTH) {
             backgroundOffset = 0.0f;
         }
 
+        // End the game if time runs out or the player loses all lives
         if (gameTime <= 0 || playerLives <= 0) {
             gameRunning = false;
         }
 
         glutPostRedisplay();
-        glutTimerFunc(16, update, 0);
+        glutTimerFunc(16, update, 0);  // Call update every 16ms (~60 FPS)
     }
 }
+
 
 void spawnGameObject(int type) {
     GameObject obj;

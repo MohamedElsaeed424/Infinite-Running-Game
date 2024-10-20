@@ -18,7 +18,7 @@
     <None Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="game.cpp">
+    <ClCompile Include="P23-55-12559.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
